@@ -2,13 +2,13 @@
 
 library(ggplot2)
 library(reshape2)
-library(XLConnect)
+library(psych)
 
 #########################
 ##### Clean up data #####
 #########################
 
-raw <- readWorksheetFromFile("ESP 804 Spring 804 Data with scales NEP_value_wts.xlsx", sheet=1)
+raw <- read.csv("01_RawData/ESP 804 Spring 804 Data with scales NEP_value_wts.csv")
 d <- raw[]
 
 
@@ -24,6 +24,8 @@ hist(d$SciThinking, breaks = 4, labels = TRUE, ylim=c(0,220))
 
 
 # Calculate scales for each biotech question type (i.e. combine answers to all 5 products)
+bt <- read.csv("02_ProcessedData/ESP_804_Spring_2017_Survey_biotech.csv", header=TRUE, row.names = 1)
+
 names(bt) <- gsub('_1', '_Familiar', names(bt))
 names(bt) <- gsub('_2', '_Support', names(bt))
 names(bt) <- gsub('_4', '_Beneficial', names(bt))
@@ -39,15 +41,15 @@ regulate <- c('biopharm_StrictReg','herbicide_StrictReg', 'biofort_StrictReg', '
 scaleKey <- c(1,1,1,1,1)
 
 familiarity.results <- scoreItems(keys = scaleKey, items = bt[familiarity], totals = FALSE, missing = FALSE, min=1, max = 5)
-bt2$BT.fam <- familiarity.results$score
+bt$BT.fam <- familiarity.results$score
 benefit.results <- scoreItems(keys = scaleKey, items = bt[benefit], totals = FALSE, missing = FALSE, min=1, max = 5)
-bt2$BT.bene <- benefit.results$score
+bt$BT.bene <- benefit.results$score
 support.results <- scoreItems(keys = scaleKey, items = bt[support], totals = FALSE, missing = FALSE, min=1, max = 5)
-bt2$BT.sup <- support.results$score
+bt$BT.sup <- support.results$score
 risk.results <- scoreItems(keys = scaleKey, items = bt[risk], totals = FALSE, missing = FALSE, min=1, max = 5)
-bt2$BT.risk <- risk.results$score
+bt$BT.risk <- risk.results$score
 regulate.results <- scoreItems(keys = scaleKey, items = bt[regulate], totals = FALSE, missing = FALSE, min=1, max = 5)
-bt2$BT.reg <- regulate.results$score
+bt$BT.reg <- regulate.results$score
 d$BT.fam <- familiarity.results$score
 d$BT.bene <- benefit.results$score
 d$BT.sup <- support.results$score
@@ -126,7 +128,9 @@ d$farm_now[d$farm_now > 2] <- 0
 d$farm <- d$farm_c + d$farm_now
 d$farm[d$farm ==2] <- 1
 
-write.csv('')
+d_sum <- data.frame(do.call(cbind, lapply(d, summary)))
+
+write.table(d, '02_ProcessedData/170419_SurveyData_T_C_scales.txt', sep='\t')
 
 
 
@@ -134,7 +138,7 @@ write.csv('')
 ##### Dig into Biotech Responses #####
 ######################################
 # Place respondent IDs and biotech answers in seprate file:
-bt <- read.csv("ESP_804_Spring_2017_Survey_biotech.csv", header=TRUE, row.names = 1)
+bt <- read.csv("02_ProcessedData/ESP_804_Spring_2017_Survey_biotech.csv", header=TRUE, row.names = 1)
 
 names(bt) <- gsub('_1', '_Familiar', names(bt))
 names(bt) <- gsub('_2', '_Support', names(bt))
@@ -155,6 +159,7 @@ cor.test(sup, fam)
 cor.test(sup, bene)
 cor.test(sup, reg)
 
+# Summary of responses to each question by technology
 bt_tmp <- bt$ID <- row.names(bt)
 d_opin <- melt(bt, id = 'ID')
 d_opin$prod <- as.character(lapply(strsplit(as.character(d_opin$variable), split="_"),head, n=1))
@@ -196,7 +201,52 @@ ggplot(d_opin_top25p, aes(x = reorder_tech(prod), y = value, group=quest, color=
   stat_summary(geom="line", fun.y=function(x) mean(x) , size=2)
 #ggsave("181214_AveResp_ByProd_Nuanced25.pdf", width=5, height = 5)
 
+# Multiple linear regression models 
 
+summary(lm(Biot_clusters$BT.sup ~ BT.fam + sci_rel_1  + male + white  + ag_famil + SciThinking + science + age_cat + politics + edu_cat_STEM + nep + open + balt + halt, data=Biot_clusters))
+summary(lm(d$BT.bene ~ BT.fam + sci_rel_1  + male + white + ag_famil + SciThinking + science + age_cat + politics + edu_cat_STEM + nep + open + balt + halt, data=Biot_clusters))
+summary(lm(d$BT.risk ~ BT.fam + sci_rel_1 + male + white + ag_famil + SciThinking + science + age_cat + politics + edu_cat_STEM + nep + open + balt + halt, data=Biot_clusters))
+summary(lm(d$BT.reg ~ BT.fam + sci_rel_1 + male + white + ag_famil + SciThinking + science + age_cat + politics + edu_cat_STEM + nep + open + balt + halt, data=Biot_clusters))
+summary(lm(d$CoVar_mean ~ BT.fam + sci_rel_1 + male + white + ag_famil + SciThinking + science + age_cat + politics + edu_cat_STEM + nep + open + balt + halt, data=Biot_clusters))
+
+
+
+
+
+## Check for a white-male effect
+d.wm <- d[,c('BT.fam','BT.sup','BT.bene','BT.risk','BT.reg','male','white')]
+d.wm <- na.omit(d.wm)
+
+d.wm$male <- as.factor(d.wm$male)
+d.wm$white <- as.factor(d.wm$white)
+ggplot(d.wm, aes(x=BT.bene, color=male, fill=male)) + 
+  geom_histogram(position="identity", alpha=0.5, binwidth = 0.25) +
+  theme_bw(18) +
+  facet_grid(.~d.wm$white)
+
+summary(lm(BT.sup ~ white*male, d.wm))
+summary(lm(BT.risk ~ white*male, d.wm))
+summary(lm(BT.bene ~ white*male, d.wm))
+summary(lm(BT.reg ~ white*male, d.wm))
+
+
+## ANOVA and Tukey test on differences between biotech products on each question
+library(tidyr)
+d.aov <- bt
+d.aov$ID <- NULL
+d.aov <- melt(d.aov, id='ID')
+d.aov <- separate(data = d.aov, col = variable, into = c("bt", "q"), sep = "_")
+
+# ANOVA
+sup.aov <- aov(value ~ bt, subset(d.aov, q == 'Support'))
+ben.aov <- aov(value ~ bt, subset(d.aov, q == 'Beneficial'))
+ris.aov <- aov(value ~ bt, subset(d.aov, q == 'Risky'))
+reg.aov <- aov(value ~ bt, subset(d.aov, q == 'Reg'))
+
+# Tukey on all but Regulation
+plot(TukeyHSD(x=sup.aov, which='bt', conf.level=0.95))
+plot(TukeyHSD(x=ben.aov, which='bt', conf.level=0.95))
+plot(TukeyHSD(x=ris.aov, which='bt', conf.level=0.95))
 
 
 #######################################
@@ -211,18 +261,23 @@ bt <- bt[,!(grepl('Fam', names(bt)))]
 library(clValid)
 
 cl_test <- clValid(bt, 3:10, clMethods=c('kmeans'), validation='internal')
+scores(cl_test)
 optimalScores(cl_test)
+sil <- read.csv('03_Clustering/clValid_Silhouette.csv')
+ggplot(sil, aes(x=k, y=sill)) + geom_bar(stat="identity") + theme_bw()
+ggsave("Manuscript_Prep/190810_ClValid_Silhouette.pdf", width=5, height = 5)
 
 ### Note: Optimal number of clusters selected based on silhouette width: 5
 
 k <- 5
-#Biot_clusters <- kmeans(bt, k) # Note - ran once, saved results. Re-running will require re-doing everything past this step!
-d$Biotech_cluster_NF_k5 <- Biot_clusters$cluster
-bt$cluster <- Biot_clusters$cluster
-write.csv(d, '170503_data_BT_clusters.txt', sep='\t', quote=F)
+# Biot_clusters <- kmeans(bt, k) # Note - ran once, saved results. Re-running will require re-doing everything past this step!
+# d$Biotech_cluster_NF_k5 <- Biot_clusters$cluster
+# bt$cluster <- Biot_clusters$cluster
+# write.csv(d, '170503_data_BT_clusters.txt', sep='\t', quote=F)
 
-plotcluster(bt, Biot_clusters$cluster,main="5 Clusters")
-Biot_clusters$size
+Biot_clusters <- read.csv('03_Clustering/170503_data_BT_clusters.txt', sep='\t')
+plotcluster(bt, Biot_clusters$Biotech_cluster_NF_k5, method = 'dc',main="5 Clusters")
+summary(as.factor(Biot_clusters$Biotech_cluster_NF_k5))
 
 
 # Plot cluster means
